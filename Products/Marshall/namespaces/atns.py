@@ -30,6 +30,9 @@ $Id: $
 
 from sets import Set
 
+from zope import interface
+from zope import component
+
 from Products.CMFCore.utils import getToolByName
 from Products.Archetypes import config as atcfg
 from Products.Archetypes.debug import log
@@ -40,6 +43,7 @@ from Products.Marshall.handlers.atxml import SchemaAttribute
 from Products.Marshall.handlers.atxml import getRegisteredNamespaces
 from Products.Marshall.exceptions import MarshallingException
 from Products.Marshall import utils
+from Products.Marshall.interfaces.fields import IFieldSerializer
 
 import transaction
 
@@ -58,6 +62,9 @@ class BoundReference(object):
         self.attribute.deserialize( self.instance, self.ns_data )
 
 
+
+
+
 class ATAttribute(SchemaAttribute):
     
     def get(self, instance):
@@ -67,7 +74,15 @@ class ATAttribute(SchemaAttribute):
         return filter(None, values)
 
     def serialize(self, dom, parent_node, instance, options={}):
-        
+        #XXX ramonski: using zca for field serialization
+        field = instance.Schema().getField(self.name)
+        adapter = component.queryMultiAdapter((instance, field), IFieldSerializer)
+        if adapter is not None:
+            node = adapter.serialize(dom, options)
+            if node is not None:
+                parent_node.appendChild(node)
+                return True
+
         values = self.get( instance )
         if not values:
             return
@@ -92,6 +107,7 @@ class ATAttribute(SchemaAttribute):
                     node.append( ref_node )
             else:
                 value_node = dom.createTextNode( str( value ) )
+
                 node.appendChild( value_node )
         
             node.normalize()
@@ -112,13 +128,23 @@ class ATAttribute(SchemaAttribute):
             return
         else:
             data[self.name] = value
-        
+
     def deserialize(self, instance, ns_data, options={}):
+        #XXX ramonski: using zca for field deserialization
+        field = instance.Schema().getField(self.name)
+        adapter = component.queryMultiAdapter((instance, field), IFieldSerializer)
+        if adapter is not None:
+            if adapter.deserialize(ns_data, options):
+                return
+
         values = ns_data.get( self.name )
         if not values:
             return
 
-	# check if we are a schema attribute
+        if self.name == "id":
+            transaction.savepoint()
+
+        # check if we are a schema attribute
         if self.isReference( instance ):
             values = self.resolveReferences( instance, values)
             if not config.HANDLE_REFS :
@@ -128,12 +154,10 @@ class ATAttribute(SchemaAttribute):
         if not mutator:
             # read only field no mutator, but try to set value still
             # since it might reflect object state (like ATCriteria)
-            field = instance.getField( self.name ).set( instance, values )
+            instance.getField( self.name ).set( instance, values )
             #raise AttributeError("No Mutator for %s"%self.name)
             return
-        
-        if self.name == "id":
-            transaction.savepoint()
+
         mutator(values)
 
     def resolveReferences(self, instance, values):
@@ -348,6 +372,12 @@ class Archetypes(XmlNamespace):
 ##                    schema_name = context.reader.Value()
 ##                    break
             assert schema_name, "No field name specified in at:field element"
+
+            field = context.instance.Schema().getField(schema_name)
+            adapter = component.queryMultiAdapter((context.instance, field), IFieldSerializer)
+            if adapter is not None:
+                return adapter.processXml(context, data_node)
+
             #print "field", schema_name
             self.last_schema_id = schema_name
             attribute = self.getAttributeByName(schema_name, context)
