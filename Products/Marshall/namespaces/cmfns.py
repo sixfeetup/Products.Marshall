@@ -153,6 +153,7 @@ class LocalRolesAttribute(SchemaAttribute):
 
         while context.reader.MoveToNextAttribute():
             if context.reader.LocalName() == 'user_id':
+                # this looks for all the world like a bug to me.  Fix it too
                 user_id = reader.Value()
             elif context.reader.LocalName() == 'role':
                 role = context.reader.Value()
@@ -287,40 +288,46 @@ class WorkflowAttribute(SchemaAttribute):
         nsprefix = node.tag[:node.tag.find('}') + 1]
 
         #iworkflow
-        wf_node = node.find(nsprefix + 'workflow')
-        wf_id = (wf_node.attrib.get(nsprefix + 'id') or
-                 wf_node.attrib.get('id'))
-                 #be tolerant with namespace sloppyness;)
-        assert wf_id
+        wf_nodes = node.findall(nsprefix + 'workflow')
+        wf_ids = [(node.attrib.get(nsprefix + 'id') or
+                   node.attrib.get('id')) for node in wf_nodes]
+                   # be tolerant of namespace sloppyness ;)
+        # ensure we have some ids at all
+        assert wf_ids
+        for wf_id in wf_ids:
+            # ensure we have an id for each workflow
+            assert wf_id
 
         wf_data = data.setdefault(self.name, {})
-        wf_data.setdefault(wf_id, [])
-        wf_pstate = data.setdefault('_wf_pstate', wf_id)
+        for wf_id in wf_ids:
+            wf_data.setdefault(wf_id, [])
+        # set _wf_pstate to the __last__ wf id in the list (the most recent)
+        wf_pstate = data.setdefault('_wf_pstate', wf_ids[-1])
 
         #history
-        hist_nodes = wf_node.findall(nsprefix + 'history')
-        wf_pstate = data['_wf_pstate']
-        for hist_node in hist_nodes:
-            record = {}
-            data[self.name][wf_pstate].append(record)
+        for idx, wf_node in enumerate(wf_nodes):
+            wf_id = wf_ids[idx]
+            hist_nodes = wf_node.findall(nsprefix + 'history')
+            for hist_node in hist_nodes:
+                record = {}
+                data[self.name][wf_id].append(record)
 
-            #var
-            var_nodes = hist_node.findall(nsprefix + 'var')
-            vid = vtype = value = None
+                #var
+                var_nodes = hist_node.findall(nsprefix + 'var')
+                vid = vtype = value = None
 
-            for var_node in var_nodes:
-                vid = (var_node.attrib.get(nsprefix + 'id') or
-                       var_node.attrib.get('id'))
-                vtype = (var_node.attrib.get(nsprefix + 'type', None) or
-                         var_node.attrib.get('type'))
-                value = (var_node.attrib.get(nsprefix + 'value', None) or
-                         var_node.attrib.get('value') or '')
+                for var_node in var_nodes:
+                    vid = (var_node.attrib.get(nsprefix + 'id') or
+                           var_node.attrib.get('id'))
+                    vtype = (var_node.attrib.get(nsprefix + 'type', None) or
+                             var_node.attrib.get('type'))
+                    value = (var_node.attrib.get(nsprefix + 'value', None) or
+                             var_node.attrib.get('value') or '')
 
-                assert vid and vtype and not value is None
+                    assert vid and vtype and not value is None
 
-                value = demarshall_value(value, vtype)
-                wf_pstate = data['_wf_pstate']
-                data[self.name][wf_pstate][-1][vid] = value
+                    value = demarshall_value(value, vtype)
+                    data[self.name][wf_id][-1][vid] = value
 
         return True
 
