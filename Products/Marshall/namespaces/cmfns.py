@@ -154,7 +154,7 @@ class LocalRolesAttribute(SchemaAttribute):
         while context.reader.MoveToNextAttribute():
             if context.reader.LocalName() == 'user_id':
                 # this looks for all the world like a bug to me.  Fix it too
-                user_id = reader.Value()
+                user_id = context.reader.Value()
             elif context.reader.LocalName() == 'role':
                 role = context.reader.Value()
 
